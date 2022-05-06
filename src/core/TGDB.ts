@@ -4,6 +4,7 @@ import { LogLevel, MsgIdTable, TGDBConfig } from "../types";
 import { parseDbsIndex } from "./parse";
 import { Database } from "./Database";
 import { isClean } from "./utils";
+import { writeFileSync } from "fs";
 
 /** Create a Telegram Database instance. */
 export class TGDB {
@@ -41,6 +42,14 @@ export class TGDB {
 
     this.debug("Connected to Telegram");
 
+    if (this.config.channelId == null) {
+      const result = JSON.parse(JSON.stringify(await this.createDbChannel()))
+      this.config.channelId = result.channelId
+      const { id } = await this.sendMessage("tgdb:entry")
+      this.config.entryPoint = id
+      console.warn('Your channelId:' + this.config.channelId + '\nYour tgdb entry:' + this.config.entryPoint)
+    }
+
     const entryPoint = await this.getMessage(this.config.entryPoint);
     if (!entryPoint) {
       throw new Error("Entry point not found!");
@@ -48,8 +57,7 @@ export class TGDB {
       this.debug("Initiating new TGDB instance");
 
       // create metadata
-      const { id } = await this.sendMessage(`meta
-${this.config.channelId}\n${this.config.entryPoint}\n0`);
+      const { id } = await this.sendMessage(`meta${this.config.channelId}\n${this.config.entryPoint}\n0`);
       this.debug("Created metadata");
 
       // create entry point
@@ -70,13 +78,52 @@ ${this.config.channelId}\n${this.config.entryPoint}\n0`);
     );
     return messages[0];
   }
+  private async createDbChannel() {
+
+    const result: Api.Updates = await this.client.invoke(
+      new Api.channels.CreateChannel({
+        title: "Database",
+        about: "Your data will be stored here",
+        geoPoint: new Api.InputGeoPoint({
+          lat: 8.24,
+          long: 8.24,
+          accuracyRadius: 43,
+        }),
+        address: "database channel",
+      })
+    ) as Api.Updates;
+
+    /* 
+        const result: Api.Updates = await this.client.invoke(
+          new Api.channels.CreateChannel({
+            title: "Database",
+            about: "Your data will be stored here",
+            geoPoint: new Api.InputGeoPoint({
+              lat: 8.24,
+              long: 8.24,
+              accuracyRadius: 43,
+            }),
+            address: "database channel",
+          })
+        ) */
+    //UpdateNewChannelMessage
+    return result.updates[1];
+  }
 
   private async sendMessage(
     text: string,
   ): Promise<Api.Message> {
     if (!this.connected) await this.connect();
+
+    let channelId: number;
+    if (this.config.channelId != null) {
+      channelId = this.config.channelId
+    } else {
+      channelId = -1
+    }
+
     return await this.client.sendMessage(
-      this.config.channelId,
+      channelId,
       { message: text },
     );
   }
@@ -132,6 +179,9 @@ ${this.config.channelId}\n${this.config.entryPoint}\n0`);
       throw new Error(`Database '${name}' already exists!`);
     }
 
+    if (this.config.channelId == null) {
+      this.config.channelId = 12321312;
+    }
     const dbMsg = await this.sendMessage(`${name} 0 null null`);
     const indexes = await this.getDbIndexes();
     const secondLastIndex = indexes.at(-2) ?? indexes[0];

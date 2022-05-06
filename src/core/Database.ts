@@ -10,7 +10,7 @@ export class Database {
     private tgdb: TGDB,
     public readonly name: string,
     private readonly dbEntryPoint: number,
-  ) {}
+  ) { }
 
   private debug(log: string) {
     if (!this.tgdb.config.debug) return;
@@ -30,8 +30,14 @@ export class Database {
   private async sendMessage(
     text: string,
   ): Promise<Api.Message> {
+    let channelId: number;
+    if (this.tgdb.config.channelId != null) {
+      channelId = this.tgdb.config.channelId
+    } else {
+      channelId = -1
+    }
     return await this.tgdb.client.sendMessage(
-      this.tgdb.config.channelId,
+      channelId,
       { message: text },
     );
   }
@@ -202,8 +208,7 @@ ${sentMsgs.at(-1)!.text.split("\n").slice(1).join("\n")}`;
     }
 
     this.debug(
-      `New record added: '${key}' ${
-        (new TextEncoder().encode(valueText)).length
+      `New record added: '${key}' ${(new TextEncoder().encode(valueText)).length
       } bytes`,
     );
   }
@@ -258,9 +263,8 @@ ${newValues[oldPagesCount + i]}`,
         headers[3] = id.toString();
 
         await prevMsg.edit({
-          text: `${headers.join(" ")}\n${
-            prevMsg.text.split("\n").slice(1).join("\n")
-          }`,
+          text: `${headers.join(" ")}\n${prevMsg.text.split("\n").slice(1).join("\n")
+            }`,
         });
         existingMsgIds.push(id);
       }
@@ -310,8 +314,7 @@ ${newValues[oldPagesCount + i]}`,
     }
 
     this.debug(
-      `Record modified: '${key}' ${
-        (new TextEncoder().encode(valueText)).length
+      `Record modified: '${key}' ${(new TextEncoder().encode(valueText)).length
       } bytes`,
     );
     return true;

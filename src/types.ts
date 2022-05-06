@@ -9,7 +9,7 @@ export interface TGDBConfig {
   /** Telegram API hash https://my.telegram.org */
   apiHash: string;
   /** Public or private channel ID to setup TGDB instance */
-  channelId: number;
+  channelId?: number  ;
   /** First message with the text "tgdb:entry" */
   entryPoint: number;
   /** Minimal logging */
