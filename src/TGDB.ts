@@ -1,5 +1,5 @@
 import { Database } from "./Database";
-import { TGDBConfig } from "../types";
+import { TGDBConfig } from "./types";
 import { parseData, parseIndex, Table } from "./utils/parse";
 import { isClean } from "./utils/utils";
 
