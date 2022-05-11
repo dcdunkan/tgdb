@@ -1,7 +1,7 @@
 import { Api } from "telegram";
 import { blue, dim, green } from "chalk";
 
-import { TelegramDB } from "./TGDB";
+import { TelegramDB } from "./TelegramDB";
 import { parseData, parseIndex, Table } from "./utils/parse";
 import { isClean } from "./utils/utils";
 

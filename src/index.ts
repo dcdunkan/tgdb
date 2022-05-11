@@ -1,3 +1,3 @@
 export * from "./types";
-export { TelegramDB as TGDB } from "./TGDB";
+export { TelegramDB } from "./TelegramDB";
 export { Database } from "./Database";
