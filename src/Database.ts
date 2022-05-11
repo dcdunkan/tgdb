@@ -390,6 +390,11 @@ ${this.name} ${this.entryPoint}\n${newValues[oldPageCount + i]}`,
     const records = await this.getRecordIds();
     const msgIds = Object.values(records);
     for await (const msgId of msgIds) {
+      const pages = await this.getRecordPages(msgId);
+      pages.map(async ({ header }) => {
+        if (!header.next_msg_id) return;
+        await this.deleteMessage(header.next_msg_id);
+      });
       await this.deleteMessage(msgId);
     }
 

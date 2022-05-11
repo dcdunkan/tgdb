@@ -271,6 +271,32 @@ export class TelegramDB {
       console.log(
         `${dim(">")} ${green.bold("ENTRY POINT")}${dim(":")} ${cyan(id)}`,
       );
+    } else {
+      this.debug("Checking entry point...");
+      if (!this.connected) {
+        await this.client.connect();
+        this.connected = true;
+      }
+      const entryPoint = await this.getMessage(this.config.entryPoint);
+      if (!entryPoint) {
+        const { id } = await this.sendMessage("TGDB 0 null null");
+        this.config.entryPoint = id;
+        if (!printedSaveInfo) console.log(`${cyan(">")} Save these somewhere:`);
+
+        console.log(
+          `${dim(">")} ${green.bold("ENTRY POINT")}${dim(":")} ${cyan(id)}`,
+        );
+        this.debug("Entry point is okay");
+      } else if (entryPoint.text === "tgdb:entry") {
+        this.debug("Initializing entry point...");
+        await this.client.editMessage(
+          this.config.channelId,
+          { message: this.config.entryPoint, text: "TGDB 0 null null" },
+        );
+        this.debug("Entry point is okay");
+      } else {
+        this.debug("Entry point is okay");
+      }
     }
 
     if (!this.connected) {
