@@ -1,17 +1,19 @@
 > **WARNING: unstable**. This is a concept and the **work is still in
 > progress**. You should expect breaking changes.
 
-<center>
+<div align="center">
+
+---
+  
+<img width="250px" src="https://user-images.githubusercontent.com/70066170/167955253-22b0f766-c1ab-446f-b2f3-b67a08e6c8e2.png">
+
+# Project TGDB
+
+**Telegram channels as databases!**
 
 ---
 
-## Project TGDB
-
-### Telegram channels as databases!
-
----
-
-</center>
+</div>
 
 Using this library you can use your private or public Telegram channels as
 minimal database service. It is fast, free, secure and unlimited. A channel can
@@ -54,7 +56,7 @@ Create a private or public Telegram channel.
 > in the channel.
 
 <hr>
-</details><br>
+</details>
 
 ### Create a TelegramDB instance
 
