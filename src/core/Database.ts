@@ -1,21 +1,27 @@
-import { TGDB } from "./TGDB";
-import { parseData, parseDb } from "./parse";
 import { Api } from "telegram";
-import { isClean } from "./utils";
+import { blue, dim, green } from "chalk";
 
-const VALUE_LENGTH_PER_PAGE = 3072;
+import { TelegramDB } from "./TGDB";
+import { parseData, parseIndex, Table } from "./utils/parse";
+import { isClean } from "./utils/utils";
+
+/** Value length per page */
+const VLPP = 3072;
 
 export class Database {
-  constructor(
-    private tgdb: TGDB,
-    public readonly name: string,
-    private readonly dbEntryPoint: number,
-  ) {}
-
   private debug(log: string) {
     if (!this.tgdb.config.debug) return;
-    console.log(`[${new Date().toISOString()}] [db:${this.name}] - ${log}`);
+    console.log(
+      `${dim.cyan(`[${new Date().toISOString()}]`)} \
+[${blue("TGDB")}@${green(this.name)}] ${log}`,
+    );
   }
+
+  constructor(
+    private tgdb: TelegramDB,
+    private readonly name: string,
+    private readonly entryPoint: number,
+  ) {}
 
   private async getMessage(
     messageId: number,
@@ -31,8 +37,18 @@ export class Database {
     text: string,
   ): Promise<Api.Message> {
     return await this.tgdb.client.sendMessage(
-      this.tgdb.config.channelId,
+      this.tgdb.config.channelId!,
       { message: text },
+    );
+  }
+
+  private async editMessage(
+    messageId: number,
+    text: string,
+  ): Promise<Api.Message> {
+    return await this.tgdb.client.editMessage(
+      this.tgdb.config.channelId!,
+      { message: messageId, text: text },
     );
   }
 
@@ -46,7 +62,65 @@ export class Database {
     );
   }
 
-  // get record
+  private async getRecordsIndexes(
+    firstIndexId = this.entryPoint,
+  ) {
+    const { text } = await this.getMessage(firstIndexId);
+    const data = parseIndex(text);
+    const indexes = [data];
+    if (data.header.next_msg_id) {
+      const nextIndex = await this.getRecordsIndexes(data.header.next_msg_id);
+      indexes.push(...nextIndex);
+    }
+    return indexes;
+  }
+
+  private async getRecordPages(messageId: number) {
+    const { text } = await this.getMessage(messageId);
+    const data = parseData(text);
+    const pages = [data];
+    if (data.header.next_msg_id) {
+      const next = await this.getRecordPages(data.header.next_msg_id);
+      pages.push(...next);
+    }
+    return pages;
+  }
+
+  private async getRecordValue(messageId: number) {
+    const { text } = await this.getMessage(messageId);
+    const { header, value } = parseData(text);
+    let record = value;
+    if (header.next_msg_id) {
+      record += await this.getRecordValue(header.next_msg_id);
+    }
+    return record;
+  }
+
+  /**
+   * Get message IDs of all of the records in the database
+   * @returns `{ key: message_id, ... }` object.
+   */
+  async getRecordIds() {
+    const indexes = await this.getRecordsIndexes();
+    const table: Table = {};
+    for (const index of indexes) {
+      Object.assign(table, index.table);
+    }
+    return table;
+  }
+
+  /**
+   * Gets the value of a record by it's key. Throws an error if the record
+   * does not exist in the database.
+   *
+   * ```ts
+   * const value = await db.get("key");
+   * console.log(value);
+   * ```
+   *
+   * @param key Key of the value to get
+   * @returns Value of the record
+   */
   async get<T = any>(key: string): Promise<T> {
     const clean = isClean(key);
     if (!clean) {
@@ -54,120 +128,71 @@ export class Database {
         `Invalid key '${key}'. A key can only contain A-Z, a-z, 0-9, - and _`,
       );
     }
-    const records = await this.getAll();
+    const records = await this.getRecordIds();
     const recordEntryPoint = records[key];
     if (!recordEntryPoint) throw new Error(`'${key}' does not exists!`);
-    const value = await this.getRecordValueRecursive(recordEntryPoint);
+    const value = await this.getRecordValue(recordEntryPoint);
     return JSON.parse(value) as T;
   }
 
-  async getAll() {
-    const databases = await this.tgdb.getDatabases();
-    if (!(this.name in databases)) {
-      throw new Error("Database does not exists!");
-    }
-
-    return await this.getDbRecursive(databases[this.name]);
-  }
-
-  private async getRecordIndexes(
-    recordIndexMsgId = this.dbEntryPoint,
-  ) {
-    const { text } = await this.getMessage(recordIndexMsgId);
-    const data = parseDb(text);
-    const indexes = [data];
-    if (data.header.next_msg_id) {
-      const nextIndex = await this.getRecordIndexes(data.header.next_msg_id);
-      indexes.push(...nextIndex);
-    }
-    return indexes;
-  }
-
-  private async getRecordValueRecursive(messageId: number): Promise<string> {
-    const { text } = await this.getMessage(messageId);
-    const { header, value } = parseData(text);
-    let recordValue = value;
-    if (header.next_msg_id) {
-      recordValue += await this.getRecordValueRecursive(header.next_msg_id);
-    }
-    return recordValue;
-  }
-
-  private async getDbRecursive(
-    messageId: number,
-  ) {
-    const { text } = await this.getMessage(messageId);
-    const { header, data } = parseDb(text);
-    if (header.next_msg_id) {
-      const nextData = await this.getDbRecursive(header.next_msg_id);
-      Object.assign(data, nextData);
-    }
-    return data;
-  }
-
-  private async getRecordPagesRecursive(messageId: number) {
-    const { text } = await this.getMessage(messageId);
-    const data = parseData(text);
-    const pages = [data];
-    if (data.header.next_msg_id) {
-      const nextPages = await this.getRecordPagesRecursive(
-        data.header.next_msg_id,
-      );
-      pages.push(...nextPages);
-    }
-    return pages;
-  }
-
-  async insert<T = any>(key: string, value: T) {
+  /**
+   * Adds a new record to the database. Throws an error if the record already
+   * exist in the database.
+   *
+   * ```ts
+   * await db.add("key", { "value": "value" });
+   * ```
+   *
+   * - Key name can only contain `A-Z`, `a-z`, `0-9`, `-` and `_`.
+   * - Value should be a JavaScript object.
+   * @param key Key of the record
+   * @param value Value of the record
+   * @returns Returns `true` if the record was successfully added to the database
+   */
+  async add<T = any>(key: string, value: T) {
     const clean = isClean(key);
     if (!clean) {
       throw new Error(
         `Invalid key '${key}'. A key can only contain A-Z, a-z, 0-9, - and _`,
       );
     }
-    const records = await this.getAll();
-    if (records[key] !== undefined) {
-      return this.debug(`key '${key}' already exists. Cannot be re-added`);
+    const indexes = await this.getRecordsIndexes();
+    const records: Table = {};
+    for (const index of indexes) {
+      Object.assign(records, index.table);
+    }
+    if (records[key]) {
+      this.debug(`key '${key}' already exists. Cannot be re-added`);
+      throw new Error(`key '${key}' already exists. Cannot be re-added`);
     }
 
     const values: string[] = [];
     const valueText = JSON.stringify(value);
-    const totalPages = Math.ceil(valueText.length / VALUE_LENGTH_PER_PAGE);
+    const totalPages = Math.ceil(valueText.length / VLPP);
 
     for (let i = 0; i < totalPages; i++) {
-      values.push(
-        valueText.slice(
-          i * VALUE_LENGTH_PER_PAGE,
-          (i + 1) * VALUE_LENGTH_PER_PAGE,
-        ),
-      );
+      const part = valueText.slice(i * VLPP, (i + 1) * VLPP);
+      values.push(part + "\nMOO");
     }
 
-    const sentMsgs: Api.Message[] = [];
-
-    const recordEntryPointMsg = await this.sendMessage(
-      `${key} 0 null null
-${this.name} ${this.dbEntryPoint}
-${values[0]}`,
+    const entryPointMsg = await this.sendMessage(
+      `${key} 0 null null\n${this.name} ${this.entryPoint}\n${values[0]}`,
     );
-    sentMsgs.push(recordEntryPointMsg);
+    const sentMsgs = [entryPointMsg];
 
-    // update records index
-    const recordIndexes = await this.getRecordIndexes();
-    const secondLastIndex = recordIndexes.at(-2) ?? recordIndexes[0];
-    const messageToEdit = secondLastIndex.header.next_msg_id
+    // update record indexes
+    const secondLastIndex = indexes.at(-2) ?? indexes[0];
+    const msgToEditId = secondLastIndex.header.next_msg_id
       ? secondLastIndex.header.next_msg_id
-      : this.dbEntryPoint;
-    const lastIndexMsg = await this.getMessage(messageToEdit);
+      : this.entryPoint;
+    const lastIndexMsg = await this.getMessage(msgToEditId);
     const modifiedText = lastIndexMsg.text +
-      `\n${key} ${recordEntryPointMsg.id}`;
+      `\n${key} ${entryPointMsg.id}`;
 
-    if (modifiedText.length > VALUE_LENGTH_PER_PAGE) {
+    if (modifiedText.length > VLPP) {
       const newIndex = await this.sendMessage(
-        `${this.name} ${recordIndexes.length} ${messageToEdit} null
-${key} ${recordEntryPointMsg.id}`,
+        `${this.name} ${indexes.length} ${msgToEditId} null\n${key} ${entryPointMsg.id}`,
       );
-
       const lines = lastIndexMsg.text.split("\n");
       const headers = lines[0].split(" ");
       headers[3] = `${newIndex.id}`;
@@ -177,105 +202,100 @@ ${key} ${recordEntryPointMsg.id}`,
       await lastIndexMsg.edit({ text: modifiedText });
     }
 
-    // if it's more than 1 msg
     if (values.length > 1) {
       for (let i = 1; i <= values.length; i++) {
         const value = values[i];
         if (!value) continue;
 
         const prevMsg = await this.sendMessage(
-          `${key} ${i} ${sentMsgs.at(-1)!.id} null
-${this.name} ${this.dbEntryPoint}
-${value}`,
+          `${key} ${i} ${sentMsgs.at(-1)?.id} null
+${this.name} ${this.entryPoint}\n${value}`,
         );
-
-        // update the previous msg's next_msg_id part.
         const lastSentMsgHeaders = sentMsgs.at(-1)!.text
           .split("\n")[0].split(" ");
         lastSentMsgHeaders[3] = prevMsg.id.toString();
         const modifiedText = `${lastSentMsgHeaders.join(" ")}
-${sentMsgs.at(-1)!.text.split("\n").slice(1).join("\n")}`;
-        const msg = await this.getMessage(sentMsgs.at(-1)!.id);
-        await msg.edit({ text: modifiedText });
+${sentMsgs.at(-1)?.text.split("\n").slice(1).join("\n")}`;
+
+        await this.editMessage(sentMsgs.at(-1)?.id!, modifiedText);
         sentMsgs.push(prevMsg);
       }
     }
 
-    this.debug(
-      `New record added: '${key}' ${
-        (new TextEncoder().encode(valueText)).length
-      } bytes`,
-    );
+    this.debug(`Record added: '${key}'`);
+    return true;
   }
 
-  async modify<T>(key: string, value: T) {
+  /**
+   * Modifies an existing record in the database. Throws an error if the record
+   * does not exist in the database.
+   *
+   * ```ts
+   * await db.edit("key", { "value": "new value" });
+   * ```
+   *
+   * @param key Key of the record to modify
+   * @param value Should be a full new value.
+   */
+  async edit<T = any>(key: string, value: T) {
     const clean = isClean(key);
     if (!clean) {
       throw new Error(
         `Invalid key '${key}'. A key can only contain A-Z, a-z, 0-9, - and _`,
       );
     }
-    const records = await this.getAll();
-    const recordEntryPoint = records[key];
-    // does not exist.
-    if (recordEntryPoint === undefined) {
+    const records = await this.getRecordIds();
+    const entryPoint = records[key];
+    if (!entryPoint) {
+      this.debug(`key '${key}' does not exists! Add the record first`);
       throw new Error(`key '${key}' does not exists! Add the record first`);
     }
 
     const valueText = JSON.stringify(value);
-    const newPagesCount = Math.ceil(
-      valueText.length / VALUE_LENGTH_PER_PAGE,
-    );
+    const newPageCount = Math.ceil(valueText.length / VLPP);
 
-    const oldPages = await this.getRecordPagesRecursive(recordEntryPoint);
-    const oldPagesCount = oldPages.length; // just for convenience
+    const oldPages = await this.getRecordPages(entryPoint);
+    const oldPageCount = oldPages.length; // just for convenience
 
-    // Get message ids
-    const existingMsgIds = oldPages.map((data) => data.header.next_msg_id);
-    existingMsgIds.unshift(recordEntryPoint); // add the very first one.
-    existingMsgIds.pop(); // remove the last 'null'
+    const oldMsgIds = oldPages.map((data) => data.header.next_msg_id);
+    oldMsgIds.unshift(entryPoint); // add the very first one.
+    oldMsgIds.pop(); // remove the last 'null'
 
     const newValues: string[] = []; // new values for each page
-    for (let i = 0; i < newPagesCount; i++) {
-      newValues.push(
-        valueText.slice(
-          i * VALUE_LENGTH_PER_PAGE,
-          (i + 1) * VALUE_LENGTH_PER_PAGE,
-        ),
-      );
+    for (let i = 0; i < newPageCount; i++) {
+      const part = valueText.slice(i * VLPP, (i + 1) * VLPP);
+      newValues.push(part + "\nMOO");
     }
 
-    if (newPagesCount > oldPagesCount) {
-      const pagesToAdd = newPagesCount - oldPagesCount; // need to send these boys
+    if (newPageCount > oldPageCount) {
+      const pagesToAdd = newPageCount - oldPageCount; // need to send these boys
       for (let i = 0; i < pagesToAdd; i++) {
         const { id } = await this.sendMessage(
-          `${key} ${oldPagesCount + i} ${existingMsgIds.at(-1)!} null
-${this.name} ${this.dbEntryPoint}
-${newValues[oldPagesCount + i]}`,
+          `${key} ${oldPageCount + i} ${oldMsgIds.at(-1)!} null
+${this.name} ${this.entryPoint}\n${newValues[oldPageCount + i]}`,
         );
-        const prevMsg = await this.getMessage(existingMsgIds.at(-1)!);
+        const prevMsg = await this.getMessage(oldMsgIds.at(-1)!);
         const headers = prevMsg.text.split("\n")[0].split(" ");
         headers[3] = id.toString();
-
         await prevMsg.edit({
           text: `${headers.join(" ")}\n${
             prevMsg.text.split("\n").slice(1).join("\n")
           }`,
         });
-        existingMsgIds.push(id);
+        oldMsgIds.push(id);
       }
 
-      for (let i = 0; i < oldPagesCount; i++) {
-        const msg = await this.getMessage(existingMsgIds[i]!);
+      for (let i = 0; i < oldPageCount; i++) {
+        const msg = await this.getMessage(oldMsgIds[i]!);
         const notToChange = msg.text.split("\n").slice(0, 2).join("\n");
         const newText = `${notToChange}\n${newValues[i]}`;
         if (msg.text !== newText) {
           await msg.edit({ text: newText });
         }
       }
-    } else if (newPagesCount === oldPagesCount) {
-      for (let i = 0; i < existingMsgIds.length; i++) {
-        const msg = await this.getMessage(existingMsgIds[i]!);
+    } else if (newPageCount === oldPageCount) {
+      for (let i = 0; i < oldMsgIds.length; i++) {
+        const msg = await this.getMessage(oldMsgIds[i]!);
         const notToChange = msg.text.split("\n").slice(0, 2).join("\n");
         const newText = `${notToChange}\n${newValues[i]}`;
         if (msg.text !== newText) {
@@ -283,16 +303,12 @@ ${newValues[oldPagesCount + i]}`,
         }
       }
     } else {
-      // delete and updating stuff: TODO
-      const deleteCount = oldPagesCount - newPagesCount;
-      const toDelete = existingMsgIds.slice(
-        existingMsgIds.length - deleteCount,
-      );
-      for (const msgId of toDelete) await this.deleteMessage(msgId!);
-      const toUpdate = existingMsgIds.slice(
-        0,
-        existingMsgIds.length - deleteCount,
-      );
+      const deleteCount = oldPageCount - newPageCount;
+      const toDelete = oldMsgIds.slice(oldMsgIds.length - deleteCount);
+      for (const msgId of toDelete) {
+        await this.deleteMessage(msgId!);
+      }
+      const toUpdate = oldMsgIds.slice(0, oldMsgIds.length - deleteCount);
 
       for (let i = 0; i < toUpdate.length; i++) {
         const msg = await this.getMessage(toUpdate[i]!);
@@ -309,14 +325,14 @@ ${newValues[oldPagesCount + i]}`,
       }
     }
 
-    this.debug(
-      `Record modified: '${key}' ${
-        (new TextEncoder().encode(valueText)).length
-      } bytes`,
-    );
-    return true;
+    this.debug(`Record modified: '${key}'`);
   }
 
+  /**
+   * Removes the specified record from the database. Throws an error if the
+   * record does not exist in the database.
+   * @param key Key of the record to delete
+   */
   async delete(key: string) {
     const clean = isClean(key);
     if (!clean) {
@@ -324,35 +340,38 @@ ${newValues[oldPagesCount + i]}`,
         `Invalid key '${key}'. A key can only contain A-Z, a-z, 0-9, - and _`,
       );
     }
-    const records = await this.getAll();
+    const records = await this.getRecordIds();
     const recordEntryPoint = records[key];
 
     if (recordEntryPoint === undefined) {
+      this.debug(`key '${key}' does not exists! Add the record first`);
       throw new Error(`key '${key}' does not exists! Add the record first`);
     }
 
-    const oldPages = await this.getRecordPagesRecursive(recordEntryPoint);
+    const oldPages = await this.getRecordPages(recordEntryPoint);
 
     const msgIds = oldPages.map((data) => data.header.next_msg_id); // Get message ids
     msgIds.unshift(recordEntryPoint); // add the very first one.
     msgIds.pop(); // remove the last 'null'
 
     // delete the data
-    for await (const msgId of msgIds) await this.deleteMessage(msgId!);
+    for await (const msgId of msgIds) {
+      await this.deleteMessage(msgId!);
+    }
 
     // clear from record index (db)
-    const recordIndexes = await this.getRecordIndexes();
+    const recordIndexes = await this.getRecordsIndexes();
     for (let i = 0; i < recordIndexes.length; i++) {
-      const { header, data } = recordIndexes[i];
+      const { header, table } = recordIndexes[i];
       const indexMsgId = recordIndexes[i - 1]?.header.next_msg_id ??
-        this.dbEntryPoint;
-      if (key in data) {
-        const i = Object.keys(data).indexOf(key);
-        const itemsArr = Object.entries(data);
-        itemsArr.splice(i, 1);
+        this.entryPoint;
+      if (key in table) {
+        const keyIndex = Object.keys(table).indexOf(key);
+        const recordsArray = Object.entries(table);
+        recordsArray.splice(keyIndex, 1);
         let records = "";
-        for (const item of itemsArr) {
-          records += `${item[0]} ${item[1]}`;
+        for (const item of recordsArray) {
+          records += `${item[0]} ${item[1]}\n`;
         }
 
         const msg = await this.getMessage(indexMsgId);
@@ -363,20 +382,21 @@ ${newValues[oldPagesCount + i]}`,
       }
     }
 
-    this.debug(`Deleted '${key}'`);
+    this.debug(`Record deleted: '${key}'`);
   }
 
+  /** Clears all records from the database */
   async clear() {
-    const records = await this.getAll();
+    const records = await this.getRecordIds();
     const msgIds = Object.values(records);
     for await (const msgId of msgIds) {
       await this.deleteMessage(msgId);
     }
 
     // clear from record index (db)
-    const recordIndexes = await this.getRecordIndexes();
+    const recordIndexes = await this.getRecordsIndexes();
 
-    const msg = await this.getMessage(this.dbEntryPoint);
+    const msg = await this.getMessage(this.entryPoint);
     const header = msg.text.split("\n")[0].split(" ");
     header[3] = "null";
     const modifiedText = header.join(" ");

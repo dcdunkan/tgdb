@@ -1,24 +1,27 @@
-> It's a **work in progress**!
+> **WARNING: unstable**. This is a concept and the **work is still in
+> progress**. You should expect breaking changes.
 
-# The TGDB
+<center>
 
-Use Telegram channel as a minimal databases! 🚀 It's **fast**, faster than I
-expected it to be, and like Telegram, it's **free**, **unlimited** and 🔓
-**secure**, because you know, it is using Telegram's storage 😬. You may want to
-look at
-["Why this might not be a good idea/choice?"](#why-this-might-not-be-a-good-ideachoice)
-also.
+---
 
-## What is this?
+## Project TGDB
 
-With this library, you can use your **private** or **public**
-[Telegram](https://telegram.org) channel as minimal databases for your projects.
-Create multiple databases, add, edit and delete records. It's still a small
-concept and pretty bad code.
+### Telegram channels as databases!
+
+---
+
+</center>
+
+Using this library you can use your private or public Telegram channels as
+minimal database service. It is fast, free, secure and unlimited. A channel can
+contain multiple databases, and it is possible to retrieve, insert, modify, and
+delete records. You may also want to look at
+["Is this a good choice for my projects?"](#is-this-a-good-choice-for-my-projects).
 
 ## Installation
 
-**Install** the package using NPM via GitHub:
+Install the package using NPM (via GitHub)
 
 ```bash
 npm install dcdunkan/tgdb#main
@@ -26,90 +29,183 @@ npm install dcdunkan/tgdb#main
 
 ## Usage
 
-Here's a minimal example on how to use this library. But, initialize the TGDB
-instance follow these steps first:
+Here's a minimal example on using this library. But to initialize a TGDB
+instance, you have to go to https://my.telegram.org/ and login with your
+account. You'll get a API ID and API hash from there. Store it somewhere secure.
 
-1. Create a **private** or **public** Telegram channel.
-   - Send a message to the channel with the text: "**tgdb:entry**".
-   - Get the channel **chat_id** and **message_id** of that message you just
-     sent.
+<details>
+  <summary>Optional steps (Will be prompted anyway)</summary><hr>
+
+Get string session by running
+[this](https://painor.gitbook.io/gramjs/#installation) installation example of
+[GramJS](https://github.com/gram-js/gramjs) and save it somewhere. You can use
+the API ID and API hash you got earlier from https://my.telegram.org.
+
+> Installation example: https://painor.gitbook.io/gramjs/#installation
+
+Create a private or public Telegram channel.
+
+- Send a message to the channel with the text: "_tgdb:entry_".
+- Get the channel **chat_id** and **message_id** of that message you just sent.
 
 > You may use [@jsoonbot](https://telegram.me/jsoonbot),
 > [@ForwardInfoBot](https://telegram.me/ForwardInfoBot) or bots like that to get
 > the **chat_id** and **message_id**, by forwarding that message you just sent
 > in the channel.
 
-2. Go to https://my.telegram.org/ and login with your account.
-   - Get the **API ID** and **API Hash**.
-   - Get string session by running
-     [this](https://painor.gitbook.io/gramjs/#installation) installation example
-     of [GramJS](https://github.com/gram-js/gramjs) and save it somewhere.
+<hr>
+</details><br>
 
-> Installation example: https://painor.gitbook.io/gramjs/#installation
+### Create a TelegramDB instance
 
-#### Create a TGDB instance
+Import the `TelegramDB` class from the library.
 
 ```ts
-import { TGDB } from "tgdb-core";
+import { TelegramDB } from "tgdb-core";
+```
 
-const tgdb = new TGDB({
+Create an instance:
+
+```ts
+const tgdb = new TelegramDB({
   apiId: 123456, // API ID from https://my.telegram.org/
   apiHash: "ABCD", // API hash from https://my.telegram.org/
+
   stringSession: "...", // String session you got from GramJS
   channelId: -100071801131325, // Channel `chat_id`
   entryPoint: 4, // `message_id` of the message "tgdb:entry"
 });
-
-await tgdb.connect(); // connect to the database
 ```
 
-#### Work with the database
+All of the above parameters are required to initialize a `TelegramDB` instance.
+However, it is possible to start the program by only providing your `apiId` and
+`apiHash`. When you call the `TelegramDB.connect()` as shown below, the program
+will prompt you to enter some details to generate the rest of the parameters.
+You have to store them in a safe place and use them when you're running the
+program again to avoid further unnecessary logins and channel creations. Now
+connect to the instance call:
 
 ```ts
-// Create a database
-const db = await tgdb.createDatabase("employees");
-// Or you could use
+await tgdb.connect(); // connect to the instance
+```
+
+### Working with a database
+
+Currently you have two operations related with the instance and four basic
+operations related to records.
+
+#### Creating and deleting databases
+
+To create a new database or to choose an existing one:
+
+```ts
 const db = await tgdb.database("employees");
-// ^ it chooses an existing database, OR
-// creates one if it does not exists.
+```
 
-// Insert record to the database
-await db.insert("12345678", { first_name: "Linus" });
+To delete a database:
 
-// Get the record data using
+```ts
+await tgdb.deleteDatabase("employees");
+```
+
+#### Working with records
+
+At the moment, you are only allowed to pass an JavaScript object as the value.
+You can expect this to change in any future update.
+
+```ts
+// Add a record to the database
+await db.add("12345678", { first_name: "Linus" });
+
+// Get a record data using
 const data = await db.get("12345678");
+console.log(data);
 
-// Modify the existing record data
-await db.modify("12345678", {
-  ...data,
-  second_name: "Torvalds",
-});
+// Modify an existing record data
+await db.edit("12345678", { ...data, second_name: "Torvalds" });
 
-// Delete the record
+// Delete a record
 await db.delete("12345678");
 
 // Clear the whole database
 await db.clear();
 ```
 
+- Querying the data is still in the TODO list.
+- While modifying (`Database.edit(key: string, value: any)`) the data, you have
+  to pass a full value. You cannot yet update a particular key-value pair in the
+  JSON object.
+- Clearing the database using `Database.clear()` will not delete the database.
+  It will only delete all of the records, and the database name will still be in
+  the `entryPoint` message of the channel.
+
+### TODO
+
+- Method to query data
+- Allow storing not only as JSON objects
+- Schema and Types
+- Allow modifying a single key-value in the JSON object
+
 ---
 
-### Why this might not be a good idea/choice?
+## FAQ
 
-You see, this library works just by reading and sending messages in a particular
-format using [MTProto API](https://core.telegram.org/tdlib). And
-[GramJS](https://github.com/gram-js/gramjs) is used as the client library for
-it. There are **rate limits**. That's the only issue I'm seeing with this library.
-But, I don't think rate limits will be an issue for small scale applications,
-though. Hey, I am not really sure about this, but I think: if the API calls are
-hitting the limits frequently, your account may even get suspended.
+(Or at least I expect these questions will be asked)
 
-> **"I am not as smart as the Telegram devs, but I'd put something in place that
-> prevents such projects from succeeding at any meaningful scale :D"** ~ (Not me)
+### How this works?
+
+Actually the concept is pretty simple. We store the data in a particular format
+as Telegram messages. For reading, the data is retrieved and parsed back in to
+the JSON object. Internally, we use [GramJS](https://github.com/gram-js/gramjs)
+to work with the User account.
+
+### Why User accounts? Not bots?
+
+Telegram bots cannot read the past messages. Ironically, in order to do that,
+they need another database. You can cross-check with the
+[Official Bot API documentation](https://core.telegram.org/bots/api) if you want
+to. Since this library need to read and edit and delete the old messages, it is
+necessary to use an User account for this project.
+
+> #### Can my account get banned or suspended?
+>
+> Hopefully, **no**. At least, I used my main account for testing while
+> developing this, and nothing happened yet :) I have hit the API limits
+> multiple times, and still nothing happened.
+
+### Why channels, not group or private chats?
+
+It's called spamming, if you sent a lot of messages in a short period of time :)
+And as I believe, sending messages in channels like that, is not restricted as
+sending in groups and private chats.
+
+### Is this a good choice for my projects?
+
+That is something I am not totally sure about. For small projects, believe me,
+it won't be a problem at all. But for a large-scale thingy, I am not sure. Sure,
+this library can handle it, but Telegram rate limits are the only thing that
+could be an issue. And sending a lot of messages (storing data) in a small time
+period can also be considered as spamming - and for that your account might get
+banned or suspended.
+
+This project is still in it's early stage. Maybe, we can have proper answer for
+this after testing in large scale. After the first stable release though.
+
+## Related repositories
+
+### Under development
+
+- Web UI for manage the database
+
+### Ideas
+
+- HTTP API server
+- Backups (A normal bot, maybe?)
+- Data migration
 
 ---
 
 <p align="center">
-  <samp><a href="LICENSE">MIT License</a> (C) 2022, Dunkan</samp><br>
+  <samp><a href="LICENSE">MIT License (C) 2022, Dunkan</a></samp><br>
   <samp><b>&lt; ♥️ & ☕ &gt;</b></samp>
 </p>

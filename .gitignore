@@ -1,5 +1,6 @@
-deno.json
 dist/
 node_modules/
 .env
 package-lock.json
+junk.txt
+.vscode
