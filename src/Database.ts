@@ -110,6 +110,17 @@ export class Database {
   }
 
   /**
+   * Check whether a key exists or not.
+   *
+   * @param key Key to search for
+   * @returns Returns `true` if the key exists. And `false` if not.
+   */
+  async exists(key: string) {
+    const records = await this.getRecordIds();
+    return records[key] ? true : false;
+  }
+
+  /**
    * Gets the value of a record by it's key. Throws an error if the record
    * does not exist in the database.
    *
@@ -122,12 +133,6 @@ export class Database {
    * @returns Value of the record
    */
   async get<T = any>(key: string): Promise<T> {
-    const clean = isClean(key);
-    if (!clean) {
-      throw new Error(
-        `Invalid key '${key}'. A key can only contain A-Z, a-z, 0-9, - and _`,
-      );
-    }
     const records = await this.getRecordIds();
     const recordEntryPoint = records[key];
     if (!recordEntryPoint) throw new Error(`'${key}' does not exists!`);
